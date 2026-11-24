@@ -1,0 +1,29 @@
+# Copy this file plus a host `.env` onto the EC2 app directory once.
+# Runtime secrets stay on the machine. Image is pulled by GitHub Actions.
+
+services:
+  app:
+    image: iamcyberster/aftersales:latest
+    container_name: aftersales
+    # 3000–3003 are already used on this EC2 (galactica / prestige / godrej / golden-doors).
+    ports:
+      - "3004:3000"
+    restart: unless-stopped
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000', res => process.exit(res.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3

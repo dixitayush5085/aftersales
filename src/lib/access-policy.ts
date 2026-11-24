@@ -5,7 +5,7 @@ import {
   type Role,
 } from "@/types";
 
-export const CONFIGURABLE_ROLES: Role[] = ["SUPER_MANAGER", "MANAGER", "TEAM_MEMBER"];
+export const CONFIGURABLE_ROLES: Role[] = ["MANAGER", "TEAM_LEAD", "TEAM_MEMBER"];
 
 const empty = (): PermissionSet =>
   Object.fromEntries(PERMISSIONS.map((key) => [key, false])) as PermissionSet;
@@ -20,7 +20,7 @@ export const DEFAULT_ACCESS: Record<Role, PermissionSet> = {
     viewRolledBack: true,
     manageAccess: true,
   },
-  SUPER_MANAGER: {
+  MANAGER: {
     assignClients: true,
     accessTeam: true,
     inviteUsers: true,
@@ -29,7 +29,7 @@ export const DEFAULT_ACCESS: Record<Role, PermissionSet> = {
     viewRolledBack: false,
     manageAccess: false,
   },
-  MANAGER: {
+  TEAM_LEAD: {
     assignClients: false,
     accessTeam: true,
     inviteUsers: false,
@@ -60,13 +60,13 @@ export const ACCESS_LOCKS: Record<Role, Partial<PermissionSet>> = {
     viewRolledBack: true,
     manageAccess: true,
   },
-  SUPER_MANAGER: { manageAccess: false },
   MANAGER: { manageAccess: false },
+  TEAM_LEAD: { manageAccess: false },
   TEAM_MEMBER: { manageAccess: false },
 };
 
 export function isLocked(role: Role, permission: Permission) {
-  return ACCESS_LOCKS[role][permission] !== undefined;
+  return ACCESS_LOCKS[role]?.[permission] !== undefined;
 }
 
 export function applyAccessLocks(role: Role, set: PermissionSet): PermissionSet {

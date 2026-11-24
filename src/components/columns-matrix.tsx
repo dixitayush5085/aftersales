@@ -31,7 +31,7 @@ import {
   type Role,
 } from "@/types";
 
-const WORKING_ROLES: Role[] = ["SUPER_MANAGER", "MANAGER", "TEAM_MEMBER"];
+const WORKING_ROLES: Role[] = ["MANAGER", "TEAM_LEAD", "TEAM_MEMBER"];
 
 export function ColumnsMatrix({ columns }: { columns: ClientColumn[] }) {
   const [rows, setRows] = useState(columns);
@@ -189,8 +189,8 @@ function AddColumnDialog({ onCreated }: { onCreated: (col: ClientColumn) => void
   const [type, setType] = useState<CustomColumnType>("text");
   const [visible, setVisible] = useState<Record<Role, boolean>>({
     ADMIN: true,
-    SUPER_MANAGER: false,
     MANAGER: false,
+    TEAM_LEAD: false,
     TEAM_MEMBER: false,
   });
   const [pending, start] = useTransition();
@@ -203,7 +203,7 @@ function AddColumnDialog({ onCreated }: { onCreated: (col: ClientColumn) => void
         if (!next) {
           setLabel("");
           setType("text");
-          setVisible({ ADMIN: true, SUPER_MANAGER: false, MANAGER: false, TEAM_MEMBER: false });
+          setVisible({ ADMIN: true, MANAGER: false, TEAM_LEAD: false, TEAM_MEMBER: false });
         }
       }}
     >

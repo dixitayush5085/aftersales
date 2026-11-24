@@ -23,8 +23,8 @@ const links: {
   { href: "/clients", label: "Clients", icon: FolderKanban },
   { href: "/admin/users", label: "Team", icon: Users, permission: "accessTeam" },
   { href: "/admin/access", label: "Access", icon: Shield, permission: "manageAccess" },
-  // Groups stays in the data model (Manager → Super Manager) but the Admin
-  // screen is hidden until a named-pod workflow is actually needed.
+  // Named groups remain in the database from the old Super Manager pods.
+  // Reporting now follows Manager → Team Lead, so the Groups screen stays hidden.
   // { href: "/admin/groups", label: "Groups", icon: UserPlus, permission: "manageAccess" },
 ];
 

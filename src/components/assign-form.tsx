@@ -28,10 +28,10 @@ export function AssignForm({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Assign account manager</DialogTitle>
+          <DialogTitle>Assign team member</DialogTitle>
         </DialogHeader>
         {ams.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Invite an account manager first from Team.</p>
+          <p className="text-sm text-muted-foreground">Invite a team member first from Team.</p>
         ) : (
           <form
             className="space-y-4"
@@ -51,7 +51,7 @@ export function AssignForm({
           >
             <Select value={amId} onValueChange={setAmId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select an account manager" />
+                <SelectValue placeholder="Select a team member" />
               </SelectTrigger>
               <SelectContent>
                 {ams.map((am) => (

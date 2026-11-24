@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Inbox, RotateCcw, Users } from "lucide-react";
+import { ArrowRight, Inbox, RotateCcw, Users } from "lucide-react";
 import { auth } from "@/lib/auth";
 import { getDashboard } from "@/lib/queries/clients";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,7 +39,7 @@ export default async function DashboardPage() {
             title: "Unassigned",
             value: data.counts.unassigned,
             icon: Inbox,
-            hint: "Waiting for an account manager",
+            hint: "Waiting for a team member",
             tone: "vermillion" as const,
           },
         ]
@@ -73,8 +73,10 @@ export default async function DashboardPage() {
       </div>
       <TargetProgress
         amount={data.target.amount}
+        personal={data.target.personal}
         achieved={data.target.achieved}
         monthLabel={data.target.monthLabel}
+        scopeLabel={data.target.scopeLabel}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -142,7 +144,7 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Blocked steps</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-poster-vermillion" />
+            <p className="text-xs text-muted-foreground">{data.counts.openSteps} open in your view</p>
           </CardHeader>
           <CardContent className="space-y-3">
             {data.blocked.length === 0 ? (

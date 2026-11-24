@@ -14,27 +14,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { nextRole, ROLE_LABELS, type Role } from "@/types";
+import { canGrantRole, nextRole, ROLE_LABELS, type Role } from "@/types";
 
 export function PromoteButton({
   userId,
   name,
   role,
+  actorRole,
 }: {
   userId: string;
   name: string;
   role: Role;
+  actorRole: Role;
 }) {
   const target = nextRole(role);
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
-  if (!target) return null;
+  if (!target || !canGrantRole(actorRole, target)) return null;
 
   const copy =
-    target === "MANAGER"
-      ? `${name} will become a Manager and stop being an Account Manager. Their clients stay with them. They will report to the Super Manager of their current team when that link exists.`
-      : `${name} will become a Super Manager. Account managers who reported to them will need a new manager.`;
+    target === "TEAM_LEAD"
+      ? `${name} will become a Team Lead. Clients already assigned to them stay with them. They report to the Manager of their current Team Lead when that link exists.`
+      : `${name} will become a Manager and sit under Admin. Team members who reported to them will need a new Team Lead.`;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

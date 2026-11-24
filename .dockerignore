@@ -1,0 +1,12 @@
+.git
+.github
+.next
+node_modules
+uploads
+.env
+.env.*
+scripts
+README.md
+*.pem
+npm-debug.log*
+.DS_Store

@@ -31,7 +31,7 @@ export default async function InboxPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Unassigned pool</h1>
         <p className="text-sm text-muted-foreground">
-          {total} converted {total === 1 ? "client" : "clients"} waiting for an account manager.
+          {total} converted {total === 1 ? "client" : "clients"} waiting for a team member.
         </p>
       </div>
       {items.length === 0 ? (

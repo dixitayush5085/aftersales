@@ -35,5 +35,7 @@ export async function dbConnect() {
   }
 
   cached.conn = await cached.promise;
+  const { ensureHierarchyMigration } = await import("@/lib/migrate-hierarchy");
+  await ensureHierarchyMigration();
   return cached.conn;
 }

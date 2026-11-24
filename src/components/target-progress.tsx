@@ -12,12 +12,16 @@ import { formatInr } from "@/lib/format";
 
 export function TargetProgress({
   amount,
+  personal,
   achieved,
   monthLabel,
+  scopeLabel,
 }: {
   amount: number;
+  personal: number;
   achieved: number;
   monthLabel: string;
+  scopeLabel: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -34,7 +38,7 @@ export function TargetProgress({
           <div>
             <p className="text-3xl font-semibold tabular-nums">{formatInr(achieved)}</p>
             <p className="text-xs text-muted-foreground">
-              of {amount > 0 ? formatInr(amount) : "no target set"}
+              of {amount > 0 ? formatInr(amount) : "no target set"} · {scopeLabel}
             </p>
           </div>
           <p className="text-sm font-medium tabular-nums">{pct}%</p>
@@ -56,8 +60,8 @@ export function TargetProgress({
           }}
         >
           <div className="space-y-1">
-            <Label>Set this month (₹)</Label>
-            <Input name="amount" type="number" min={0} defaultValue={amount || ""} placeholder="1000000" />
+            <Label>Your target this month (₹)</Label>
+            <Input name="amount" type="number" min={0} defaultValue={personal || ""} placeholder="1000000" />
           </div>
           <Button type="submit" size="sm" disabled={pending}>
             {pending ? "Saving…" : "Save target"}

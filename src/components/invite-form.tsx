@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ROLE_LABELS, ROLES, type Role } from "@/types";
+import { canGrantRole, ROLE_LABELS, ROLES, type Role } from "@/types";
 
 type Staff = {
   id: string;
@@ -17,30 +17,24 @@ type Staff = {
   role: Role;
 };
 
-type Group = {
-  id: string;
-  name: string;
-  smUserId: string;
-};
-
 function reportsToConfig(role: Role, staff: Staff[]) {
   if (role === "TEAM_MEMBER") {
+    const options = staff.filter((s) => s.role === "TEAM_LEAD");
+    return {
+      show: true,
+      label: "Reports to (Team Lead)",
+      empty: "No team leads yet — invite a Team Lead first",
+      placeholder: "Select a team lead",
+      options,
+    };
+  }
+  if (role === "TEAM_LEAD") {
     const options = staff.filter((s) => s.role === "MANAGER");
     return {
       show: true,
       label: "Reports to (Manager)",
       empty: "No managers yet — invite a Manager first",
       placeholder: "Select a manager",
-      options,
-    };
-  }
-  if (role === "MANAGER") {
-    const options = staff.filter((s) => s.role === "SUPER_MANAGER");
-    return {
-      show: true,
-      label: "Reports to (Super Manager)",
-      empty: "No super managers yet — invite a Super Manager first",
-      placeholder: "Select a super manager",
       options,
     };
   }
@@ -60,17 +54,22 @@ export function InviteForm({
 }: {
   actorRole: Role;
   staff: Staff[];
-  groups?: Group[];
   onDone?: () => void;
 }) {
   const router = useRouter();
-  const allowedRoles = ROLES.filter((r) => actorRole === "ADMIN" || r !== "ADMIN");
-  const [role, setRole] = useState<Role>("TEAM_MEMBER");
+  const allowedRoles = ROLES.filter((r) => canGrantRole(actorRole, r));
+  const [role, setRole] = useState<Role>(
+    allowedRoles.includes("TEAM_MEMBER") ? "TEAM_MEMBER" : allowedRoles[0] ?? "TEAM_MEMBER",
+  );
   const [reportsTo, setReportsTo] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
   const reports = useMemo(() => reportsToConfig(role, staff), [role, staff]);
+
+  if (allowedRoles.length === 0) {
+    return <p className="text-sm text-muted-foreground">You can’t invite someone at your level.</p>;
+  }
 
   return (
     <form

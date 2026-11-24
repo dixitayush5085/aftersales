@@ -9,8 +9,8 @@ const ClientColumnSchema = new Schema(
     sortOrder: { type: Number, required: true, default: 0 },
     visible: {
       ADMIN: { type: Boolean, default: true },
-      SUPER_MANAGER: { type: Boolean, default: false },
       MANAGER: { type: Boolean, default: false },
+      TEAM_LEAD: { type: Boolean, default: false },
       TEAM_MEMBER: { type: Boolean, default: false },
     },
   },

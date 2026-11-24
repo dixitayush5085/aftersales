@@ -2,15 +2,15 @@ import { ROLES, type ClientColumn, type ColumnVisibility, type ColumnValueType, 
 
 const allOn = (): ColumnVisibility => ({
   ADMIN: true,
-  SUPER_MANAGER: true,
   MANAGER: true,
+  TEAM_LEAD: true,
   TEAM_MEMBER: true,
 });
 
 const allOff = (): ColumnVisibility => ({
   ADMIN: false,
-  SUPER_MANAGER: false,
   MANAGER: false,
+  TEAM_LEAD: false,
   TEAM_MEMBER: false,
 });
 
@@ -69,7 +69,7 @@ export const BUILTIN_COLUMNS: BuiltinDef[] = [
     key: "owner",
     label: "Owner",
     type: "owner",
-    description: "Assigned account manager.",
+    description: "Assigned team member.",
     visible: allOn(),
     locked: [],
   },
@@ -126,9 +126,26 @@ export function builtinSeed(): ClientColumn[] {
   }));
 }
 
+/** Read column flags, including rows saved before Super Manager was removed. */
+export function readColumnVisibility(raw?: Partial<Record<string, boolean>> | null): ColumnVisibility {
+  const source = raw ?? {};
+  const legacy = Object.prototype.hasOwnProperty.call(source, "SUPER_MANAGER");
+  const teamLead = Object.prototype.hasOwnProperty.call(source, "TEAM_LEAD")
+    ? Boolean(source.TEAM_LEAD)
+    : legacy
+      ? Boolean(source.MANAGER)
+      : Boolean(source.TEAM_LEAD);
+  return {
+    ADMIN: Boolean(source.ADMIN),
+    MANAGER: legacy ? Boolean(source.SUPER_MANAGER) : Boolean(source.MANAGER),
+    TEAM_LEAD: teamLead,
+    TEAM_MEMBER: Boolean(source.TEAM_MEMBER),
+  };
+}
+
 export function mergeColumn(stored: ClientColumn, seed?: BuiltinDef): ClientColumn {
   if (!seed) return stored;
-  const visible = { ...seed.visible, ...stored.visible };
+  const visible = { ...seed.visible, ...readColumnVisibility(stored.visible) };
   for (const role of seed.locked) {
     visible[role] = seed.visible[role];
   }

@@ -1,0 +1,112 @@
+# Build After Sales, push iamcyberster/aftersales:latest, SSH to EC2 and recreate the container.
+#
+# GitHub → Settings → Secrets and variables → Actions — add:
+#   DOCKERHUB_USERNAME     Docker Hub user (iamcyberster). Legacy: DOCKER_USERNAME
+#   DOCKERHUB_TOKEN        Docker Hub PAT. Legacy: DOCKER_PASSWORD
+#   EC2_SSH_HOST           EC2 public IP or hostname
+#   EC2_SSH_USER           SSH user (usually ec2-user)
+#   EC2_SSH_PRIVATE_KEY    Full PEM private key (BEGIN/END block)
+#
+# Optional:
+#   EC2_APP_DIR            Folder on EC2 with docker-compose.yml + .env
+#                          Default: /opt/aftersales
+#
+# One-time on EC2:
+#   sudo mkdir -p /opt/aftersales
+#   copy docker-compose.yml there
+#   create /opt/aftersales/.env (AUTH_SECRET, AUTH_URL, MONGODB_URI, …)
+#   docker login once if the Hub repo is private
+
+name: Build and Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: iamcyberster/aftersales
+  IMAGE_TAG: latest
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME || secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-ec2:
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull on EC2 and recreate aftersales
+        uses: appleboy/ssh-action@v1.2.1
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+        with:
+          host: ${{ secrets.EC2_SSH_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          command_timeout: 15m
+          envs: IMAGE_NAME,IMAGE_TAG,EC2_APP_DIR
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_DIR="${EC2_APP_DIR:-/opt/aftersales}"
+            if [ ! -d "$APP_DIR" ]; then
+              echo "Deploy directory missing: $APP_DIR"
+              exit 1
+            fi
+            if [ ! -f "$APP_DIR/docker-compose.yml" ]; then
+              echo "Missing $APP_DIR/docker-compose.yml"
+              exit 1
+            fi
+            if [ ! -f "$APP_DIR/.env" ]; then
+              echo "Missing $APP_DIR/.env"
+              exit 1
+            fi
+            cd "$APP_DIR"
+            prune_redundant_images() {
+              docker image prune -af
+              docker builder prune -af 2>/dev/null || true
+              docker container prune -f 2>/dev/null || true
+            }
+            echo "=== Disk (before deploy) ==="
+            df -h /
+            docker rm -f aftersales 2>/dev/null || true
+            prune_redundant_images
+            docker compose pull
+            docker compose up -d --no-deps --force-recreate
+            docker ps --filter name=aftersales
+            prune_redundant_images
+            echo "=== Disk (after deploy) ==="
+            df -h /
+            echo "Deploy complete."

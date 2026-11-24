@@ -4,7 +4,7 @@ import { hasPermission } from "@/lib/access";
 import { dbConnect } from "@/lib/db";
 import { Group } from "@/models/group";
 import { User } from "@/models/user";
-import type { Role } from "@/types";
+import { normalizeRole, type Role } from "@/types";
 
 export type SessionUser = {
   id: string;
@@ -18,7 +18,7 @@ export async function requireUser(): Promise<SessionUser> {
   if (!session?.user?.id) {
     throw new Error("Unauthorized");
   }
-  return session.user;
+  return { ...session.user, role: normalizeRole(session.user.role) };
 }
 
 export async function canManageUsers(role: Role) {
@@ -53,6 +53,23 @@ export async function canManageAccess(role: Role) {
   return hasPermission(role, "manageAccess");
 }
 
+async function leadIdsForManager(managerId: string) {
+  const direct = await User.find({ role: "TEAM_LEAD", managerId }).select("_id").lean();
+  const groups = await Group.find({ smUserId: managerId }).select("_id").lean();
+  const legacy = groups.length
+    ? await User.find({
+        role: "TEAM_LEAD",
+        groupId: { $in: groups.map((g) => g._id) },
+        $or: [{ managerId: null }, { managerId: { $exists: false } }],
+      })
+        .select("_id")
+        .lean()
+    : [];
+  const ids = new Map<string, Types.ObjectId>();
+  for (const row of [...direct, ...legacy]) ids.set(String(row._id), row._id as Types.ObjectId);
+  return [...ids.values()];
+}
+
 export async function visibleUserIds(user: SessionUser): Promise<string[] | "all"> {
   if (user.role === "ADMIN") return "all";
 
@@ -62,28 +79,47 @@ export async function visibleUserIds(user: SessionUser): Promise<string[] | "all
     return [user.id];
   }
 
-  if (user.role === "MANAGER") {
-    const team = await User.find({ managerId: user.id, isActive: true })
-      .select("_id")
-      .lean();
+  if (user.role === "TEAM_LEAD") {
+    const team = await User.find({ role: "TEAM_MEMBER", managerId: user.id }).select("_id").lean();
     return [user.id, ...team.map((t) => String(t._id))];
   }
 
-  const groups = await Group.find({ smUserId: user.id }).select("_id").lean();
-  const groupIds = groups.map((g) => g._id);
-  const managers = await User.find({
-    groupId: { $in: groupIds },
-    role: "MANAGER",
-  })
-    .select("_id")
-    .lean();
-  const managerIds = managers.map((m) => String(m._id));
-  const ams = await User.find({
-    managerId: { $in: managerIds.map((id) => new Types.ObjectId(id)) },
-  })
-    .select("_id")
-    .lean();
-  return [user.id, ...managerIds, ...ams.map((a) => String(a._id))];
+  if (user.role === "MANAGER") {
+    const leadIds = await leadIdsForManager(user.id);
+    const members = await User.find({ role: "TEAM_MEMBER", managerId: { $in: leadIds } })
+      .select("_id")
+      .lean();
+    return [user.id, ...leadIds.map((id) => String(id)), ...members.map((m) => String(m._id))];
+  }
+
+  return [user.id];
+}
+
+/** Team members this user is allowed to assign. Caller must already have assignClients. */
+export async function assignableTeamMemberIds(user: SessionUser): Promise<string[] | "all"> {
+  await dbConnect();
+  if (user.role === "ADMIN") return "all";
+
+  if (user.role === "TEAM_LEAD") {
+    const team = await User.find({ role: "TEAM_MEMBER", isActive: true, managerId: user.id })
+      .select("_id")
+      .lean();
+    return team.map((t) => String(t._id));
+  }
+
+  if (user.role === "MANAGER") {
+    const leadIds = await leadIdsForManager(user.id);
+    const team = await User.find({
+      role: "TEAM_MEMBER",
+      isActive: true,
+      managerId: { $in: leadIds },
+    })
+      .select("_id")
+      .lean();
+    return team.map((t) => String(t._id));
+  }
+
+  return [];
 }
 
 export async function clientMatchFor(user: SessionUser): Promise<Record<string, unknown>> {

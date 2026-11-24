@@ -1,5 +1,5 @@
 import { dbConnect } from "@/lib/db";
-import { BUILTIN_COLUMN_META, builtinSeed, mergeColumn } from "@/lib/columns-policy";
+import { BUILTIN_COLUMN_META, builtinSeed, mergeColumn, readColumnVisibility } from "@/lib/columns-policy";
 import { ClientColumnModel } from "@/models/column";
 import type { ClientColumn, Role } from "@/types";
 
@@ -24,12 +24,7 @@ function toColumn(row: {
     kind: row.kind === "custom" ? "custom" : "builtin",
     type: row.type as ClientColumn["type"],
     sortOrder: row.sortOrder,
-    visible: {
-      ADMIN: Boolean(row.visible?.ADMIN),
-      SUPER_MANAGER: Boolean(row.visible?.SUPER_MANAGER),
-      MANAGER: Boolean(row.visible?.MANAGER),
-      TEAM_MEMBER: Boolean(row.visible?.TEAM_MEMBER),
-    },
+    visible: readColumnVisibility(row.visible as Partial<Record<string, boolean>> | undefined),
   };
 }
 

@@ -1,24 +1,25 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { canAccessTeam, canInviteUsers, canPromoteUsers, canSetReportsTo } from "@/lib/rbac";
-import { listGroups, listStaff } from "@/lib/actions/users";
+import { listStaff } from "@/lib/actions/users";
 import { InviteDialog } from "@/components/invite-dialog";
 import { TeamHierarchy } from "@/components/team-hierarchy";
 import { buildOrg } from "@/lib/team-tree";
+import { normalizeRole } from "@/types";
 
 export default async function UsersPage() {
   const session = await auth();
-  if (!session?.user) return null;
-  if (!(await canAccessTeam(session.user.role))) redirect("/");
+  if (!session?.user?.id) return null;
+  const role = normalizeRole(session.user.role);
+  if (!(await canAccessTeam(role))) redirect("/");
 
-  const [staff, groups, canInvite, canPromote, canLink] = await Promise.all([
+  const [staff, canInvite, canPromote, canLink] = await Promise.all([
     listStaff(),
-    listGroups(),
-    canInviteUsers(session.user.role),
-    canPromoteUsers(session.user.role),
-    canSetReportsTo(session.user.role),
+    canInviteUsers(role),
+    canPromoteUsers(role),
+    canSetReportsTo(role),
   ]);
-  const org = buildOrg(staff, groups);
+  const org = buildOrg(staff);
   const origin = process.env.APP_URL || process.env.AUTH_URL || "";
 
   return (
@@ -27,10 +28,10 @@ export default async function UsersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
           <p className="text-sm text-muted-foreground">
-            Super Manager → Manager → Account Manager. Copy a password link from anyone’s row.
+            Admin → Manager → Team Lead → Team Member. Copy a password link from anyone’s row.
           </p>
         </div>
-        {canInvite ? <InviteDialog actorRole={session.user.role} staff={staff} /> : null}
+        {canInvite ? <InviteDialog actorRole={role} staff={staff} /> : null}
       </div>
 
       <TeamHierarchy
@@ -39,6 +40,7 @@ export default async function UsersPage() {
         currentUserId={session.user.id}
         canLink={canLink}
         canPromote={canPromote}
+        actorRole={role}
       />
     </div>
   );

@@ -7,7 +7,7 @@ import { isLocked } from "@/lib/access-policy";
 import { requireUser } from "@/lib/rbac";
 import { RoleAccess } from "@/models/access";
 import { AuditLog } from "@/models/ops";
-import { PERMISSIONS, type Permission, type Role } from "@/types";
+import { PERMISSIONS, ROLES, type Permission, type Role } from "@/types";
 
 export async function loadAccessMatrix() {
   const user = await requireUser();
@@ -23,6 +23,8 @@ export async function setRolePermission(role: Role, permission: Permission, enab
     throw new Error("Forbidden");
   }
   if (!PERMISSIONS.includes(permission)) throw new Error("Unknown action");
+  if (!ROLES.includes(role)) throw new Error("Unknown role");
+  if (permission === "manageAccess" && role !== "ADMIN") throw new Error("Forbidden");
   if (isLocked(role, permission)) throw new Error("This action is fixed for that role");
 
   await dbConnect();

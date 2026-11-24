@@ -8,21 +8,28 @@ import { ReportsToSelect } from "@/components/reports-to-select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { countReports, type OrgChart, type StaffPerson, type TreeNode } from "@/lib/team-tree";
-import { nextRole, ROLE_LABELS, type Role } from "@/types";
+import { canGrantRole, nextRole, ROLE_LABELS, type Role } from "@/types";
 import { cn } from "@/lib/utils";
 
 type Option = { id: string; name: string };
 const EditCtx = createContext<{
   canLink: boolean;
   canPromote: boolean;
-  superManagers: Option[];
+  actorRole: Role;
   managers: Option[];
-}>({ canLink: false, canPromote: false, superManagers: [], managers: [] });
+  teamLeads: Option[];
+}>({
+  canLink: false,
+  canPromote: false,
+  actorRole: "TEAM_MEMBER",
+  managers: [],
+  teamLeads: [],
+});
 
 const roleTone: Record<Role, string> = {
   ADMIN: "bg-poster-vermillion",
-  SUPER_MANAGER: "bg-poster-cobalt",
-  MANAGER: "bg-poster-chrome",
+  MANAGER: "bg-poster-cobalt",
+  TEAM_LEAD: "bg-poster-chrome",
   TEAM_MEMBER: "bg-poster-violet",
 };
 
@@ -50,12 +57,14 @@ export function TeamHierarchy({
   currentUserId,
   canLink,
   canPromote,
+  actorRole,
 }: {
   org: OrgChart;
   origin: string;
   currentUserId: string;
   canLink: boolean;
   canPromote: boolean;
+  actorRole: Role;
 }) {
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
@@ -65,26 +74,26 @@ export function TeamHierarchy({
     return {
       admins: org.admins.filter((p) => matchesQuery(p, query)),
       branches: org.branches.filter((n) => branchVisible(n, query)),
-      unlinkedManagers: org.unlinkedManagers.filter((n) => branchVisible(n, query)),
-      unlinkedAms: org.unlinkedAms.filter((p) => matchesQuery(p, query)),
+      unlinkedLeads: org.unlinkedLeads.filter((n) => branchVisible(n, query)),
+      unlinkedMembers: org.unlinkedMembers.filter((p) => matchesQuery(p, query)),
     };
   }, [org, query]);
 
   const empty =
     visible.admins.length +
       visible.branches.length +
-      visible.unlinkedManagers.length +
-      visible.unlinkedAms.length ===
+      visible.unlinkedLeads.length +
+      visible.unlinkedMembers.length ===
     0;
 
-  const superManagers = org.branches.map((n) => ({ id: n.id, name: n.name }));
-  const managers = [
-    ...org.branches.flatMap((sm) => sm.reports.map((m) => ({ id: m.id, name: m.name }))),
-    ...org.unlinkedManagers.map((m) => ({ id: m.id, name: m.name })),
+  const managers = org.branches.map((n) => ({ id: n.id, name: n.name }));
+  const teamLeads = [
+    ...org.branches.flatMap((manager) => manager.reports.map((lead) => ({ id: lead.id, name: lead.name }))),
+    ...org.unlinkedLeads.map((lead) => ({ id: lead.id, name: lead.name })),
   ];
 
   return (
-    <EditCtx.Provider value={{ canLink, canPromote, superManagers, managers }}>
+    <EditCtx.Provider value={{ canLink, canPromote, actorRole, managers, teamLeads }}>
     <div className="space-y-5">
       <div className="relative max-w-md">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -136,13 +145,13 @@ export function TeamHierarchy({
             </section>
           ) : null}
 
-          {visible.unlinkedManagers.length > 0 ? (
+          {visible.unlinkedLeads.length > 0 ? (
             <section className="space-y-3">
               <SectionLabel>
-                {org.branches.length > 0 ? "Managers not linked to a Super Manager" : "Your team"}
+                {org.branches.length > 0 ? "Team leads not linked to a Manager" : "Your team"}
               </SectionLabel>
               <div className="space-y-3">
-                {visible.unlinkedManagers.map((node) => (
+                {visible.unlinkedLeads.map((node) => (
                   <Branch
                     key={node.id}
                     node={node}
@@ -156,11 +165,11 @@ export function TeamHierarchy({
             </section>
           ) : null}
 
-          {visible.unlinkedAms.length > 0 ? (
+          {visible.unlinkedMembers.length > 0 ? (
             <section className="space-y-3">
-              <SectionLabel>Account managers without a manager</SectionLabel>
+              <SectionLabel>Team members without a team lead</SectionLabel>
               <div className="space-y-2">
-                {visible.unlinkedAms.map((person) => (
+                {visible.unlinkedMembers.map((person) => (
                   <PersonCard
                     key={person.id}
                     person={person}
@@ -215,7 +224,6 @@ function Branch({
         person={node}
         origin={origin}
         currentUserId={currentUserId}
-        groupName={node.groupName}
         parentId={node.parentId}
         under={under}
         expandable={node.reports.length > 0}
@@ -228,7 +236,7 @@ function Branch({
             <li key={child.id} className="relative pl-4 sm:pl-5">
               <span className="absolute left-0 top-0 h-full w-px bg-border" />
               <span className="absolute left-0 top-6 h-px w-4 bg-border sm:w-5" />
-              {child.role === "MANAGER" ? (
+              {child.role === "TEAM_LEAD" ? (
                 <Branch
                   node={child}
                   origin={origin}
@@ -248,10 +256,10 @@ function Branch({
             </li>
           ))}
         </ul>
-      ) : node.reports.length === 0 && (node.role === "SUPER_MANAGER" || node.role === "MANAGER") ? (
+      ) : node.reports.length === 0 && (node.role === "MANAGER" || node.role === "TEAM_LEAD") ? (
         <p className="flex items-center gap-2 border-t px-4 py-3 text-sm text-muted-foreground">
           <Users className="h-4 w-4" />
-          {node.role === "SUPER_MANAGER" ? "No managers reporting yet" : "No account managers reporting yet"}
+          {node.role === "MANAGER" ? "No team leads reporting yet" : "No team members reporting yet"}
         </p>
       ) : null}
     </div>
@@ -262,7 +270,6 @@ function PersonCard({
   person,
   origin,
   currentUserId,
-  groupName,
   parentId,
   under,
   expandable,
@@ -273,7 +280,6 @@ function PersonCard({
   person: StaffPerson;
   origin: string;
   currentUserId: string;
-  groupName?: string;
   parentId?: string;
   under?: number;
   expandable?: boolean;
@@ -318,7 +324,6 @@ function PersonCard({
         </div>
         <p className="truncate text-sm text-muted-foreground">
           {ROLE_LABELS[person.role]}
-          {groupName ? ` · ${groupName}` : ""}
           {` · ${person.email}`}
         </p>
         {under ? (
@@ -337,15 +342,15 @@ function PersonCard({
 }
 
 function ReportsControl({ person, parentId }: { person: StaffPerson; parentId?: string }) {
-  const { canLink, superManagers, managers } = useContext(EditCtx);
+  const { canLink, managers, teamLeads } = useContext(EditCtx);
   if (!canLink) return null;
-  if (person.role === "MANAGER") {
+  if (person.role === "TEAM_LEAD") {
     return (
       <ReportsToSelect
         userId={person.id}
-        value={parentId || ""}
-        options={superManagers}
-        placeholder="Link Super Manager"
+        value={parentId || person.managerId || ""}
+        options={managers}
+        placeholder="Link Manager"
       />
     );
   }
@@ -354,8 +359,8 @@ function ReportsControl({ person, parentId }: { person: StaffPerson; parentId?: 
       <ReportsToSelect
         userId={person.id}
         value={person.managerId || parentId || ""}
-        options={managers}
-        placeholder="Link Manager"
+        options={teamLeads}
+        placeholder="Link Team Lead"
       />
     );
   }
@@ -369,9 +374,10 @@ function PromoteControl({
   person: StaffPerson;
   currentUserId: string;
 }) {
-  const { canPromote } = useContext(EditCtx);
+  const { canPromote, actorRole } = useContext(EditCtx);
   if (!canPromote) return null;
   if (person.id === currentUserId) return null;
-  if (!nextRole(person.role)) return null;
-  return <PromoteButton userId={person.id} name={person.name} role={person.role} />;
+  const target = nextRole(person.role);
+  if (!target || !canGrantRole(actorRole, target)) return null;
+  return <PromoteButton userId={person.id} name={person.name} role={person.role} actorRole={actorRole} />;
 }

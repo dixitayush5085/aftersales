@@ -20,24 +20,23 @@ const platformAccent: Record<Platform, string> = {
 type TrackingData = {
   name: string;
   companyName: string;
+  progress: { completed: number; total: number; percent: number };
   platforms: {
     id: string;
     platform: Platform;
     status: PlatformStatus;
-    milestones: { id: string; label: string; status: MilestoneStatus; notes: string }[];
+    milestones: { id: string; label: string; status: MilestoneStatus }[];
   }[];
 };
 
 export function PublicTracking({ data }: { data: TrackingData }) {
-  const steps = data.platforms.flatMap((p) => p.milestones);
-  const done = steps.filter((s) => s.status === "done").length;
-  const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
+  const { completed, total, percent } = data.progress;
   const [bar, setBar] = useState(0);
 
   useEffect(() => {
-    const id = window.requestAnimationFrame(() => setBar(pct));
+    const id = window.requestAnimationFrame(() => setBar(percent));
     return () => window.cancelAnimationFrame(id);
-  }, [pct]);
+  }, [percent]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background px-4 py-12">
@@ -64,10 +63,10 @@ export function PublicTracking({ data }: { data: TrackingData }) {
             <div>
               <p className="text-sm font-medium">Overall setup</p>
               <p className="text-xs text-muted-foreground">
-                {done} of {steps.length} steps complete
+                {completed} of {total} steps complete
               </p>
             </div>
-            <p className="text-3xl font-semibold tabular-nums">{pct}%</p>
+            <p className="text-3xl font-semibold tabular-nums">{percent}%</p>
           </div>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
             <div
@@ -76,6 +75,12 @@ export function PublicTracking({ data }: { data: TrackingData }) {
             />
           </div>
         </section>
+
+        {data.platforms.length === 0 ? (
+          <p className="text-center text-sm text-muted-foreground">
+            Marketplace setup has not started yet.
+          </p>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-3">
           {data.platforms.map((p) => {
@@ -98,6 +103,7 @@ export function PublicTracking({ data }: { data: TrackingData }) {
                             "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
                             m.status === "done" && "bg-poster-viridian text-white",
                             m.status === "blocked" && "bg-poster-vermillion text-white",
+                            m.status === "in_progress" && "bg-poster-cobalt text-white",
                             m.status === "pending" && "bg-poster-chrome/15 text-poster-chrome",
                           )}
                         >
@@ -108,9 +114,6 @@ export function PublicTracking({ data }: { data: TrackingData }) {
                           <p className="text-xs text-muted-foreground">
                             {PUBLIC_MILESTONE_LABELS[m.status]}
                           </p>
-                          {m.notes ? (
-                            <p className="mt-1 text-xs text-muted-foreground">Update: {m.notes}</p>
-                          ) : null}
                         </div>
                       </li>
                     ))}

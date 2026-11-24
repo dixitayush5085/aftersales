@@ -41,6 +41,8 @@ const SaleLogSchema = new Schema(
     amount: { type: Number, required: true, min: 0 },
     units: { type: Number, default: 0, min: 0 },
     itemId: { type: Schema.Types.ObjectId, ref: "InventoryItem", default: null },
+    /** Optional SKU or lot reference. Recorded only; stock is not deducted. */
+    sku: { type: String, default: "" },
     proofUrl: { type: String, default: "" },
     soldAt: { type: Date, required: true, default: Date.now },
     notes: { type: String, default: "" },

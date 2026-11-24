@@ -11,6 +11,8 @@ const PlatformAccountSchema = new Schema(
     credentialEnc: { type: String, default: "" },
     credentialHint: { type: String, default: "" },
     credentialUpdatedAt: { type: Date, default: null },
+    /** Internal catalog / SEO notes. Never sent on the public tracking page. */
+    catalogNotes: { type: String, default: "" },
   },
   { timestamps: true },
 );

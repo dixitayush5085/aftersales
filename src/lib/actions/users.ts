@@ -14,85 +14,86 @@ import {
 } from "@/lib/rbac";
 import { Group } from "@/models/group";
 import { User } from "@/models/user";
-import { nextRole, ROLES, type Role } from "@/types";
+import { canGrantRole, nextRole, normalizeRole, ROLES, type Role } from "@/types";
 
 export async function inviteUser(input: {
   name: string;
   email: string;
   role: Role;
   reportsTo?: string;
-  managerId?: string;
-  groupId?: string;
 }) {
   const actor = await requireUser();
   if (!(await canInviteUsers(actor.role))) throw new Error("Forbidden");
-  if (input.role === "ADMIN" && actor.role !== "ADMIN") throw new Error("Forbidden");
-  if (!ROLES.includes(input.role)) throw new Error("Invalid role");
+  const role = normalizeRole(input.role);
+  if (!ROLES.includes(role)) throw new Error("Invalid role");
+  if (!canGrantRole(actor.role, role)) throw new Error("Forbidden");
 
   await dbConnect();
   const email = input.email.trim().toLowerCase();
   const exists = await User.findOne({ email });
   if (exists) throw new Error("Email already invited");
 
-  let managerId = input.managerId || null;
-  let groupId = input.groupId || null;
+  let managerId: string | null = null;
 
-  if (input.role === "TEAM_MEMBER") {
-    managerId = input.reportsTo || managerId;
-    if (managerId) {
-      const manager = await User.findOne({ _id: managerId, role: "MANAGER" });
-      if (!manager) throw new Error("Select a Manager for this Account Manager");
-      groupId = manager.groupId ? String(manager.groupId) : groupId;
-    }
-  }
-
-  if (input.role === "MANAGER") {
-    managerId = null;
-    const smId = input.reportsTo;
-    if (smId) {
-      const sm = await User.findOne({ _id: smId, role: "SUPER_MANAGER" });
-      if (!sm) throw new Error("Select a Super Manager for this Manager");
-      let group = await Group.findOne({ smUserId: sm._id });
-      if (!group) {
-        group = await Group.create({ name: `${sm.name}'s group`, smUserId: sm._id });
+  if (role === "TEAM_MEMBER") {
+    let leadId = input.reportsTo || null;
+    if (!leadId && actor.role === "TEAM_LEAD") leadId = actor.id;
+    if (leadId) {
+      const lead = await User.findOne({ _id: leadId, role: "TEAM_LEAD" });
+      if (!lead) throw new Error("Select a Team Lead for this Team Member");
+      if (actor.role === "TEAM_LEAD" && String(lead._id) !== actor.id) throw new Error("Forbidden");
+      if (actor.role === "MANAGER" && String(lead.managerId || "") !== actor.id) {
+        throw new Error("Forbidden");
       }
-      groupId = String(group._id);
+      managerId = String(lead._id);
     }
   }
 
-  if (input.role === "SUPER_MANAGER" || input.role === "ADMIN") {
-    managerId = null;
-    groupId = null;
+  if (role === "TEAM_LEAD") {
+    if (actor.role === "MANAGER") {
+      managerId = actor.id;
+    } else if (input.reportsTo) {
+      const manager = await User.findOne({ _id: input.reportsTo, role: "MANAGER" });
+      if (!manager) throw new Error("Select a Manager for this Team Lead");
+      managerId = String(manager._id);
+    }
   }
 
   const inviteToken = newAccessToken();
   const user = await User.create({
     name: input.name.trim(),
     email,
-    role: input.role,
+    role,
     isActive: false,
     managerId,
-    groupId,
+    groupId: null,
     inviteToken,
   });
 
-  revalidatePath("/admin/users");
+  revalidateTeam();
   return { id: String(user._id), inviteToken };
 }
 
-export async function createGroup(name: string, smUserId: string) {
+export async function createGroup(name: string, managerUserId: string) {
   const actor = await requireUser();
   if (actor.role !== "ADMIN") throw new Error("Forbidden");
   await dbConnect();
-  const sm = await User.findOne({ _id: smUserId, role: "SUPER_MANAGER" });
-  if (!sm) throw new Error("Super Manager not found");
-  const group = await Group.create({ name: name.trim(), smUserId: sm._id });
+  const manager = await User.findOne({ _id: managerUserId, role: "MANAGER" });
+  if (!manager) throw new Error("Manager not found");
+  const group = await Group.create({ name: name.trim(), smUserId: manager._id });
   revalidatePath("/admin/groups");
   return { id: String(group._id) };
 }
 
 function newAccessToken() {
   return crypto.randomBytes(24).toString("base64url");
+}
+
+function revalidateTeam() {
+  revalidatePath("/admin/users");
+  revalidatePath("/");
+  revalidatePath("/clients");
+  revalidatePath("/inbox");
 }
 
 export async function setReportsTo(userId: string, reportsToId: string) {
@@ -103,36 +104,34 @@ export async function setReportsTo(userId: string, reportsToId: string) {
   await dbConnect();
   const user = await User.findById(userId);
   if (!user) throw new Error("User not found");
+  const role = normalizeRole(user.role);
 
-  if (user.role === "TEAM_MEMBER") {
-    const manager = await User.findOne({ _id: reportsToId, role: "MANAGER" });
-    if (!manager) throw new Error("Select a Manager");
-    if (actor.role === "SUPER_MANAGER") {
-      const ids = await visibleUserIds(actor);
-      if (ids !== "all" && !ids.includes(String(manager._id))) {
-        throw new Error("Forbidden");
-      }
-    }
-    user.managerId = manager._id;
-    user.groupId = manager.groupId ?? null;
-  } else if (user.role === "MANAGER") {
-    const sm = await User.findOne({ _id: reportsToId, role: "SUPER_MANAGER" });
-    if (!sm) throw new Error("Select a Super Manager");
-    if (actor.role === "SUPER_MANAGER" && String(sm._id) !== actor.id) {
+  if (actor.role !== "ADMIN") {
+    const ids = await visibleUserIds(actor);
+    if (ids !== "all" && !ids.includes(String(user._id))) throw new Error("Forbidden");
+  }
+
+  if (role === "TEAM_MEMBER") {
+    const lead = await User.findOne({ _id: reportsToId, role: "TEAM_LEAD" });
+    if (!lead) throw new Error("Select a Team Lead");
+    if (actor.role === "TEAM_LEAD" && String(lead._id) !== actor.id) throw new Error("Forbidden");
+    if (actor.role === "MANAGER" && String(lead.managerId || "") !== actor.id) {
       throw new Error("Forbidden");
     }
-    let group = await Group.findOne({ smUserId: sm._id });
-    if (!group) {
-      group = await Group.create({ name: `${sm.name}'s group`, smUserId: sm._id });
-    }
-    user.groupId = group._id;
-    user.managerId = null;
+    user.managerId = lead._id;
+    user.groupId = null;
+  } else if (role === "TEAM_LEAD") {
+    const manager = await User.findOne({ _id: reportsToId, role: "MANAGER" });
+    if (!manager) throw new Error("Select a Manager");
+    if (actor.role !== "ADMIN" && String(manager._id) !== actor.id) throw new Error("Forbidden");
+    user.managerId = manager._id;
+    user.groupId = null;
   } else {
     throw new Error("This role does not report to someone");
   }
 
   await user.save();
-  revalidatePath("/admin/users");
+  revalidateTeam();
 }
 
 export async function promoteUser(userId: string) {
@@ -151,40 +150,31 @@ export async function promoteUser(userId: string) {
     }
   }
 
-  const target = nextRole(user.role as Role);
+  const current = normalizeRole(user.role);
+  const target = nextRole(current);
   if (!target) throw new Error("This person cannot be promoted further");
+  if (!canGrantRole(actor.role, target)) throw new Error("Forbidden");
 
-  if (target === "MANAGER") {
-    const previousManager = user.managerId
-      ? await User.findById(user.managerId)
-      : null;
+  if (target === "TEAM_LEAD") {
+    const previousLead = user.managerId ? await User.findById(user.managerId) : null;
+    user.role = "TEAM_LEAD";
+    user.groupId = null;
+    if (previousLead?.role === "TEAM_LEAD" && previousLead.managerId) {
+      user.managerId = previousLead.managerId;
+    } else if (actor.role === "MANAGER") {
+      user.managerId = new Types.ObjectId(actor.id);
+    } else {
+      user.managerId = null;
+    }
+  } else if (target === "MANAGER") {
     user.role = "MANAGER";
     user.managerId = null;
-    if (!user.groupId && previousManager?.groupId) {
-      user.groupId = previousManager.groupId;
-    }
-    if (!user.groupId && actor.role === "SUPER_MANAGER") {
-      let group = await Group.findOne({ smUserId: actor.id });
-      if (!group) {
-        group = await Group.create({ name: `${actor.name || "Team"}'s group`, smUserId: actor.id });
-      }
-      user.groupId = group._id;
-    }
-  }
-
-  if (target === "SUPER_MANAGER") {
-    user.role = "SUPER_MANAGER";
-    user.managerId = null;
     user.groupId = null;
-    const existingGroup = await Group.findOne({ smUserId: user._id });
-    if (!existingGroup) {
-      await Group.create({ name: `${user.name}'s group`, smUserId: user._id });
-    }
     await User.updateMany({ managerId: user._id }, { $set: { managerId: null } });
   }
 
   await user.save();
-  revalidatePath("/admin/users");
+  revalidateTeam();
   return { id: String(user._id), role: user.role as Role };
 }
 
@@ -194,9 +184,7 @@ export async function listStaff() {
   await dbConnect();
 
   const filter: Record<string, unknown> = {};
-  if (actor.role === "MANAGER") {
-    filter.$or = [{ managerId: new Types.ObjectId(actor.id) }, { _id: new Types.ObjectId(actor.id) }];
-  } else if (actor.role === "SUPER_MANAGER") {
+  if (actor.role !== "ADMIN") {
     const ids = await visibleUserIds(actor);
     if (ids !== "all") {
       filter._id = { $in: ids.map((id) => new Types.ObjectId(id)) };
@@ -229,7 +217,7 @@ export async function listStaff() {
     id: String(u._id),
     name: u.name,
     email: u.email,
-    role: u.role as Role,
+    role: normalizeRole(String(u.role)),
     isActive: Boolean(u.isActive),
     managerId: u.managerId ? String(u.managerId) : "",
     groupId: u.groupId ? String(u.groupId) : "",
@@ -238,6 +226,8 @@ export async function listStaff() {
 }
 
 export async function listGroups() {
+  const actor = await requireUser();
+  if (actor.role !== "ADMIN") return [];
   await dbConnect();
   const groups = await Group.find().lean();
   return groups.map((g) => ({

@@ -18,8 +18,8 @@ export default async function AccessPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Access</h1>
         <p className="text-sm text-muted-foreground">
-          Turn actions and client columns on or off for Super Manager, Manager, and Account
-          Manager. Admin always configures this screen and does not assign clients.
+          Turn actions and client columns on or off for Manager, Team Lead, and Team Member.
+          Admin always configures this screen and does not assign clients.
         </p>
       </div>
       <div className="space-y-3">

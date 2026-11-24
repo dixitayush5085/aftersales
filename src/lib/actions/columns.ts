@@ -89,8 +89,8 @@ export async function addClientColumn(input: {
     sortOrder,
     visible: {
       ADMIN: true,
-      SUPER_MANAGER: Boolean(input.visible.SUPER_MANAGER),
       MANAGER: Boolean(input.visible.MANAGER),
+      TEAM_LEAD: Boolean(input.visible.TEAM_LEAD),
       TEAM_MEMBER: Boolean(input.visible.TEAM_MEMBER),
     },
   });

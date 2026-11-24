@@ -6,24 +6,36 @@ import { dbConnect } from "@/lib/db";
 import { logClientActivity } from "@/lib/activity";
 import { platformsForPlan } from "@/lib/plan-platforms";
 import { decryptSecret, encryptSecret, secretHint } from "@/lib/secret-box";
-import { assertCanAccessClient, canAssignClients, requireUser } from "@/lib/rbac";
+import { assertCanAccessClient, assignableTeamMemberIds, canAssignClients, requireUser } from "@/lib/rbac";
 import { Client } from "@/models/client";
-import { Assignment, InventoryItem, InventoryLot, SaleLog, Target } from "@/models/ops";
+import { Assignment, SaleLog, Target } from "@/models/ops";
 import { Milestone, PlatformAccount } from "@/models/platform";
 import { User } from "@/models/user";
-import { PLATFORMS, type MilestoneStatus, type PlatformStatus } from "@/types";
+import {
+  GST_STATUSES,
+  PLATFORM_LABELS,
+  PLATFORMS,
+  type MilestoneStatus,
+  type Platform,
+  type PlatformStatus,
+} from "@/types";
 
 export async function assignPrimaryAm(clientId: string, amId: string) {
   const user = await requireUser();
   if (!(await canAssignClients(user.role))) throw new Error("Forbidden");
   await dbConnect();
 
+  const allowed = await assignableTeamMemberIds(user);
+  if (allowed !== "all" && !allowed.includes(String(amId))) {
+    throw new Error("You can only assign a team member on your team");
+  }
+
   const am = await User.findOne({
     _id: amId,
     role: "TEAM_MEMBER",
     isActive: true,
   });
-  if (!am) throw new Error("Account manager not found");
+  if (!am) throw new Error("Team member not found");
 
   const client = await Client.findById(clientId);
   if (!client || client.lifecycleStatus !== "active") throw new Error("Client not found");
@@ -47,7 +59,7 @@ export async function assignPrimaryAm(clientId: string, amId: string) {
 
   revalidatePath("/inbox");
   revalidatePath("/clients");
-  revalidatePath(`/clients/${clientId}`);
+  refreshClient(clientId);
 }
 
 export async function updateClientExtras(
@@ -56,6 +68,7 @@ export async function updateClientExtras(
     companyName?: string;
     gstin?: string;
     planType?: string;
+    gstStatus?: string;
     notes?: string;
     address?: string;
     state?: string;
@@ -71,6 +84,9 @@ export async function updateClientExtras(
     ...(data.companyName !== undefined ? { companyName: data.companyName } : {}),
     ...(data.gstin !== undefined ? { gstin: data.gstin } : {}),
     ...(data.planType !== undefined ? { planType: data.planType } : {}),
+    ...(data.gstStatus && (GST_STATUSES as readonly string[]).includes(data.gstStatus)
+      ? { gstStatus: data.gstStatus }
+      : {}),
     ...(data.notes !== undefined ? { notes: data.notes } : {}),
     ...(data.address !== undefined ? { address: data.address } : {}),
     ...(data.state !== undefined ? { state: data.state } : {}),
@@ -87,8 +103,10 @@ export async function updateClientExtras(
     }
   }
   await Client.updateOne({ _id: clientId }, { $set: set });
+  let profileMessage = "Updated business profile";
   if (data.planType !== undefined) {
     const included = new Set(platformsForPlan(data.planType));
+    const skipped: string[] = [];
     for (const platform of PLATFORMS) {
       const existing = await PlatformAccount.findOne({
         clientId: new Types.ObjectId(clientId),
@@ -99,6 +117,8 @@ export async function updateClientExtras(
           ? existing.status
           : "open"
         : "na";
+      if (!included.has(platform)) skipped.push(PLATFORM_LABELS[platform]);
+      // Status only. Milestones, seller login, and encrypted credentials stay as they are.
       await PlatformAccount.updateOne(
         { clientId: new Types.ObjectId(clientId), platform },
         {
@@ -108,14 +128,17 @@ export async function updateClientExtras(
         { upsert: true },
       );
     }
+    if (skipped.length) {
+      profileMessage = `Updated business profile. Marked ${skipped.join(", ")} as not needed`;
+    }
   }
   await logClientActivity({
     clientId,
     actorId: user.id,
     kind: "profile",
-    message: "Updated business profile",
+    message: profileMessage,
   });
-  revalidatePath(`/clients/${clientId}`);
+  refreshClient(clientId);
 }
 
 export async function updatePlatformStatus(accountId: string, status: PlatformStatus) {
@@ -132,7 +155,7 @@ export async function updatePlatformStatus(accountId: string, status: PlatformSt
     kind: "status",
     message: `Set ${account.platform} to ${status}`,
   });
-  revalidatePath(`/clients/${String(account.clientId)}`);
+  refreshClient(String(account.clientId));
 }
 
 export async function updateMilestone(
@@ -157,7 +180,7 @@ export async function updateMilestone(
       ? `${milestone.label}: ${data.status}`
       : `${milestone.label} notes updated`,
   });
-  revalidatePath(`/clients/${String(account.clientId)}`);
+  refreshClient(String(account.clientId));
 }
 
 export async function listAssignableAms() {
@@ -165,20 +188,10 @@ export async function listAssignableAms() {
   if (!(await canAssignClients(user.role))) return [];
   await dbConnect();
 
+  const allowed = await assignableTeamMemberIds(user);
   const filter: Record<string, unknown> = { role: "TEAM_MEMBER", isActive: true };
-  if (user.role === "MANAGER") {
-    filter.managerId = user.id;
-  }
-  if (user.role === "SUPER_MANAGER") {
-    const { Group } = await import("@/models/group");
-    const groups = await Group.find({ smUserId: user.id }).select("_id").lean();
-    const managers = await User.find({
-      groupId: { $in: groups.map((g) => g._id) },
-      role: "MANAGER",
-    })
-      .select("_id")
-      .lean();
-    filter.managerId = { $in: managers.map((m) => m._id) };
+  if (allowed !== "all") {
+    filter._id = { $in: allowed.map((id) => new Types.ObjectId(id)) };
   }
 
   const ams = await User.find(filter).select("name email").sort({ name: 1 }).lean();
@@ -208,7 +221,24 @@ export async function saveSellerCredentials(
     kind: "credential",
     message: `Updated ${account.platform} seller login`,
   });
-  revalidatePath(`/clients/${String(account.clientId)}`);
+  refreshClient(String(account.clientId));
+}
+
+export async function saveCatalogNotes(accountId: string, notes: string) {
+  const user = await requireUser();
+  await dbConnect();
+  const account = await PlatformAccount.findById(accountId);
+  if (!account) throw new Error("Not found");
+  await assertCanAccessClient(user, String(account.clientId));
+  account.catalogNotes = notes;
+  await account.save();
+  await logClientActivity({
+    clientId: String(account.clientId),
+    actorId: user.id,
+    kind: "note",
+    message: `Updated ${PLATFORM_LABELS[account.platform as Platform]} catalog / SEO notes`,
+  });
+  refreshClient(String(account.clientId));
 }
 
 export async function revealSellerPassword(accountId: string) {
@@ -221,9 +251,13 @@ export async function revealSellerPassword(accountId: string) {
   return decryptSecret(account.credentialEnc);
 }
 
+/**
+ * Inventory write hook. Stock lots, remaining quantity, and payment-proof orders
+ * stay in the schema for the next inventory pass, and this action does not create them.
+ */
 export async function addStockOrder(
   clientId: string,
-  data: {
+  _data: {
     notes: string;
     proofUrl: string;
     items: { name: string; quantity: number; unitPrice: number }[];
@@ -231,72 +265,38 @@ export async function addStockOrder(
 ) {
   const user = await requireUser();
   await assertCanAccessClient(user, clientId);
-  const items = data.items.filter((item) => item.name.trim() && item.quantity > 0);
-  if (!items.length) throw new Error("Add at least one item");
-  if (!data.proofUrl.trim()) throw new Error("Payment proof is required");
-
-  await dbConnect();
-  const amount = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const lot = await InventoryLot.create({
-    clientId,
-    notes: data.notes.trim(),
-    proofUrl: data.proofUrl.trim(),
-    amount,
-    createdById: user.id,
-    purchasedAt: new Date(),
-  });
-  await InventoryItem.insertMany(
-    items.map((item) => ({
-      lotId: lot._id,
-      clientId,
-      name: item.name.trim(),
-      quantity: item.quantity,
-      remaining: item.quantity,
-    })),
-  );
-  await logClientActivity({
-    clientId,
-    actorId: user.id,
-    kind: "stock",
-    message: `Stock order ${formatQuiet(amount)} · ${items.length} item(s)`,
-    meta: { lotId: String(lot._id), amount },
-  });
-  revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/");
+  throw new Error("Inventory recording is not available yet");
 }
 
 export async function logClientSale(
   clientId: string,
-  data: { amount: number; units: number; itemId?: string; notes: string },
+  data: { amount: number; units: number; sku?: string; notes: string; proofUrl?: string },
 ) {
   const user = await requireUser();
   await assertCanAccessClient(user, clientId);
   if (data.amount <= 0) throw new Error("Sale amount is required");
   await dbConnect();
-  if (data.itemId) {
-    const item = await InventoryItem.findOne({ _id: data.itemId, clientId });
-    if (!item) throw new Error("Inventory item not found");
-    const units = Math.max(0, data.units);
-    if (item.remaining < units) throw new Error("Not enough remaining stock");
-    item.remaining -= units;
-    await item.save();
-  }
+  const sku = (data.sku || "").trim();
+  const proofUrl = saleProofUrl(clientId, data.proofUrl);
   await SaleLog.create({
     clientId,
     userId: user.id,
     amount: data.amount,
-    units: data.units,
-    itemId: data.itemId || null,
+    units: Math.max(0, data.units || 0),
+    sku,
     notes: data.notes.trim(),
+    proofUrl,
     soldAt: new Date(),
   });
   await logClientActivity({
     clientId,
     actorId: user.id,
     kind: "sale",
-    message: `Logged sale ${formatQuiet(data.amount)}`,
+    message: sku
+      ? `Logged sale ${formatQuiet(data.amount)} · SKU ${sku}`
+      : `Logged sale ${formatQuiet(data.amount)}`,
   });
-  revalidatePath(`/clients/${clientId}`);
+  refreshClient(clientId);
   revalidatePath("/");
 }
 
@@ -306,7 +306,7 @@ export async function addClientNote(clientId: string, message: string, kind: "no
   const text = message.trim();
   if (!text) throw new Error("Write a note");
   await logClientActivity({ clientId, actorId: user.id, kind, message: text });
-  revalidatePath(`/clients/${clientId}`);
+  refreshClient(clientId);
 }
 
 export async function setMyMonthlyTarget(amount: number) {
@@ -324,4 +324,19 @@ export async function setMyMonthlyTarget(amount: number) {
 
 function formatQuiet(amount: number) {
   return `₹${Number(amount || 0).toLocaleString("en-IN")}`;
+}
+
+function refreshClient(clientId: string) {
+  revalidatePath(`/clients/${clientId}`, "layout");
+}
+
+function saleProofUrl(clientId: string, proofUrl: string | undefined) {
+  const url = (proofUrl || "").trim();
+  if (!url) return "";
+  const prefix = `/api/uploads/${clientId}/`;
+  const name = url.startsWith(prefix) ? url.slice(prefix.length) : "";
+  if (!/^[a-f0-9]{32}\.(jpg|png|webp|pdf)$/.test(name)) {
+    throw new Error("Proof file is not for this client");
+  }
+  return url;
 }

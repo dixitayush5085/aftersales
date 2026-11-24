@@ -1,11 +1,14 @@
-export const ROLES = [
-  "ADMIN",
-  "SUPER_MANAGER",
-  "MANAGER",
-  "TEAM_MEMBER",
-] as const;
+export const ROLES = ["ADMIN", "MANAGER", "TEAM_LEAD", "TEAM_MEMBER"] as const;
 
 export type Role = (typeof ROLES)[number];
+
+/** Lowest privilege first. Used to block inviting or promoting to an equal or higher role. */
+const ROLE_RANK: Record<Role, number> = {
+  TEAM_MEMBER: 1,
+  TEAM_LEAD: 2,
+  MANAGER: 3,
+  ADMIN: 4,
+};
 
 export const PLATFORMS = ["amazon", "flipkart", "meesho"] as const;
 export type Platform = (typeof PLATFORMS)[number];
@@ -37,9 +40,9 @@ export const GST_LABELS: Record<GstStatus, string> = {
 
 export const ROLE_LABELS: Record<Role, string> = {
   ADMIN: "Admin",
-  SUPER_MANAGER: "Super Manager",
   MANAGER: "Manager",
-  TEAM_MEMBER: "Account Manager",
+  TEAM_LEAD: "Team Lead",
+  TEAM_MEMBER: "Team Member",
 };
 
 export const PERMISSIONS = [
@@ -61,7 +64,7 @@ export const PERMISSION_META: Record<
 > = {
   assignClients: {
     label: "Assign clients",
-    description: "See Unassigned and give converted clients to an account manager.",
+    description: "See Unassigned and give converted clients to a team member.",
   },
   accessTeam: {
     label: "View team",
@@ -69,15 +72,15 @@ export const PERMISSION_META: Record<
   },
   inviteUsers: {
     label: "Invite people",
-    description: "Send invites for Super Manager, Manager, or Account Manager.",
+    description: "Send invites for roles below yours: Manager, Team Lead, or Team Member.",
   },
   promoteUsers: {
     label: "Promote",
-    description: "Promote Account Manager → Manager → Super Manager.",
+    description: "Promote Team Member → Team Lead → Manager. Only Admin can create a Manager.",
   },
   setReportsTo: {
     label: "Link reporting",
-    description: "Attach an Account Manager to a Manager, or a Manager to a Super Manager.",
+    description: "Attach a Team Member to a Team Lead, or a Team Lead to a Manager.",
   },
   viewRolledBack: {
     label: "See rolled back",
@@ -90,9 +93,30 @@ export const PERMISSION_META: Record<
 };
 
 export function nextRole(role: Role): Role | null {
-  if (role === "TEAM_MEMBER") return "MANAGER";
-  if (role === "MANAGER") return "SUPER_MANAGER";
+  if (role === "TEAM_MEMBER") return "TEAM_LEAD";
+  if (role === "TEAM_LEAD") return "MANAGER";
   return null;
+}
+
+/** Admin may grant any role. Everyone else may grant only roles strictly below their own. */
+export function canGrantRole(actor: Role, target: Role) {
+  if (actor === "ADMIN") return true;
+  return ROLE_RANK[target] < ROLE_RANK[actor];
+}
+
+/**
+ * Map a stored or session role onto the current catalog.
+ * `SUPER_MANAGER` was the old tier that is now `MANAGER`.
+ * A stored `MANAGER` is not remapped here — that value is already the current
+ * Manager after migration. Pre-migration Manager rows are renamed to Team Lead
+ * in `ensureHierarchyMigration` before they are read.
+ */
+export function normalizeRole(role: string | null | undefined): Role {
+  if (role === "ADMIN" || role === "MANAGER" || role === "TEAM_LEAD" || role === "TEAM_MEMBER") {
+    return role;
+  }
+  if (role === "SUPER_MANAGER") return "MANAGER";
+  return "TEAM_MEMBER";
 }
 
 export const PLATFORM_STATUS_LABELS: Record<PlatformStatus, string> = {
@@ -103,17 +127,17 @@ export const PLATFORM_STATUS_LABELS: Record<PlatformStatus, string> = {
 };
 
 export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {
-  pending: "Waiting",
+  pending: "Pending",
   in_progress: "In progress",
-  done: "Done",
-  blocked: "Needs attention",
+  done: "Completed",
+  blocked: "Blocked",
 };
 
 export const PUBLIC_MILESTONE_LABELS: Record<MilestoneStatus, string> = {
-  pending: "Queued",
+  pending: "Pending",
   in_progress: "In progress",
-  done: "Complete",
-  blocked: "We're on it",
+  done: "Completed",
+  blocked: "Blocked",
 };
 
 export const ACTIVITY_KINDS = [
